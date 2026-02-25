@@ -1,0 +1,13 @@
+import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { Hotel } from '../entities/hotel.entity';
+import { User } from '../entities/user.entity';
+import { HotelController } from './hotel.controller';
+import { HotelService } from './hotel.service';
+
+@Module({
+  imports: [TypeOrmModule.forFeature([Hotel, User])],
+  controllers: [HotelController],
+  providers: [HotelService],
+})
+export class HotelModule {}
