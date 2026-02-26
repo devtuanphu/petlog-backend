@@ -167,13 +167,13 @@ export class PaymentService {
       // Prorated upgrade
       const calc = await this.calculateUpgrade(hotelId, planName);
       amount = calc.amount;
-      description = `PetLog nâng cấp → ${plan.display_name}`;
+      description = `PetLog up ${planName}`;
       upgradeKeepExpiry = calc.type === 'upgrade';
     } else {
       // Normal purchase
       const discount = months === 12 ? 0.9 : 1;
       amount = Math.ceil((plan.price * months * discount) / 1000) * 1000;
-      description = `PetLog ${plan.display_name} ${months}T`;
+      description = `PetLog ${planName} ${months}T`;
     }
 
     if (amount <= 0) {
@@ -206,8 +206,17 @@ export class PaymentService {
       ],
     };
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    const response = await this.payos.paymentRequests.create(paymentData);
+    this.logger.log(`📤 Creating PayOS payment: orderCode=${orderCode}, amount=${amount}, plan=${planName}`);
+
+    let response: { checkoutUrl: string };
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      response = await this.payos.paymentRequests.create(paymentData);
+    } catch (err: unknown) {
+      const e = err as { message?: string; status?: number; body?: unknown };
+      this.logger.error(`❌ PayOS error: ${e.message}`, JSON.stringify(e.body || e));
+      throw new BadRequestException(`Lỗi tạo link thanh toán: ${e.message || 'PayOS error'}`);
+    }
 
     // Save payment record
     const payment = this.paymentRepo.create({
@@ -336,10 +345,11 @@ export class PaymentService {
         `↗️ Upgrade: hotel=${hotelId} → ${planName}, keeping expires_at=${sub.expires_at?.toISOString()}`,
       );
     } else {
-      // New purchase or renewal: set new expiry
+      // New purchase or renewal: set new expiry (1 month = 30 days)
       sub.started_at = new Date();
+      const daysToAdd = (months || 1) * 30;
       const expiresAt = new Date();
-      expiresAt.setMonth(expiresAt.getMonth() + (months || 1));
+      expiresAt.setDate(expiresAt.getDate() + daysToAdd);
       sub.expires_at = expiresAt;
     }
 
