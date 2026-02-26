@@ -155,10 +155,10 @@ export class RoomService {
     const sub = await this.subRepo.findOne({ where: { hotel_id: hotelId, is_active: true } });
     const currentRoomCount = await this.roomRepo.count({ where: { hotel_id: hotelId } });
 
-    const maxRooms = sub?.max_rooms || 3;
+    const maxRooms = (sub?.max_rooms || 3) + (sub?.extra_rooms || 0);
     if (currentRoomCount + addCount > maxRooms) {
       throw new ForbiddenException(
-        `Gói ${sub?.plan || 'free'} chỉ cho phép tối đa ${maxRooms} phòng. Bạn đang có ${currentRoomCount} phòng. Vui lòng nâng gói để thêm phòng.`,
+        `Gói ${sub?.plan || 'free'} cho phép tối đa ${maxRooms} phòng (${sub?.max_rooms || 3} gói + ${sub?.extra_rooms || 0} mua thêm). Bạn đang có ${currentRoomCount} phòng. Vui lòng nâng gói hoặc mua thêm phòng.`,
       );
     }
   }

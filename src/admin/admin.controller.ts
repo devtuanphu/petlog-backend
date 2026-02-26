@@ -72,7 +72,7 @@ export class AdminController {
   @Roles('admin')
   updateSubscription(
     @Param('id') id: string,
-    @Body() body: { plan?: string; max_rooms?: number; is_active?: boolean },
+    @Body() body: { plan?: string; max_rooms?: number; extra_rooms?: number; is_active?: boolean },
   ) {
     return this.adminService.updateSubscription(parseInt(id), body);
   }

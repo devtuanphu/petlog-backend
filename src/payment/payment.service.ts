@@ -141,7 +141,6 @@ export class PaymentService {
     };
   }
 
-  // ─── Create Payment Link ───
   async createPaymentLink(
     hotelId: number,
     planName: string,
@@ -149,6 +148,7 @@ export class PaymentService {
     returnUrl: string,
     cancelUrl: string,
     isUpgrade = false,
+    extraRooms = 0,
   ) {
     if (!this.payos) {
       throw new BadRequestException('PayOS chưa được cấu hình');
@@ -169,11 +169,28 @@ export class PaymentService {
       amount = calc.amount;
       description = `PetLog up ${planName}`;
       upgradeKeepExpiry = calc.type === 'upgrade';
+
+      // Add extra rooms cost for upgrade
+      if (extraRooms > 0 && calc.days_remaining > 0) {
+        const addonPrice = await this.getExtraRoomPrice();
+        const addonCost = Math.ceil(extraRooms * addonPrice * (calc.days_remaining / 30));
+        amount += Math.ceil(addonCost / 1000) * 1000;
+        description = `PetLog up ${planName} +${extraRooms}P`;
+      }
     } else {
-      // Normal purchase
+      // Normal purchase — include existing extra_rooms renewal cost + new extra rooms
+      const sub = await this.subRepo.findOne({ where: { hotel_id: hotelId } });
+      const existingExtra = sub?.extra_rooms || 0;
+      const addonPrice = await this.getExtraRoomPrice();
+      // Renewal cost for existing extra rooms + new extra rooms
+      const totalExtraRooms = existingExtra + extraRooms;
+      const addonCost = totalExtraRooms * addonPrice * months;
       const discount = months === 12 ? 0.9 : 1;
-      amount = Math.ceil((plan.price * months * discount) / 1000) * 1000;
-      description = `PetLog ${planName} ${months}T`;
+      const planCost = Math.ceil(plan.price * months * discount);
+      amount = Math.ceil((planCost + addonCost) / 1000) * 1000;
+      description = totalExtraRooms > 0
+        ? `PetLog ${planName} ${months}T +${totalExtraRooms}P`
+        : `PetLog ${planName} ${months}T`;
     }
 
     if (amount <= 0) {
@@ -225,6 +242,7 @@ export class PaymentService {
       amount,
       plan_name: planName,
       months: isUpgrade ? 0 : months, // 0 = upgrade (keep expiry)
+      extra_rooms: extraRooms,
       status: 'pending',
       checkout_url: response.checkoutUrl,
       payos_data: response as unknown as Record<string, unknown>,
@@ -269,17 +287,28 @@ export class PaymentService {
       payment.payos_data = verifiedData as unknown as Record<string, unknown>;
       await this.paymentRepo.save(payment);
 
-      // Activate — months=0 means upgrade (keep expiry)
-      const isUpgrade = payment.months === 0;
-      await this.activateSubscription(
-        payment.hotel_id,
-        payment.plan_name,
-        payment.months,
-        isUpgrade,
-      );
+      if (payment.plan_name === 'extra_rooms') {
+        // Extra rooms purchase — add to subscription
+        const sub = await this.subRepo.findOne({ where: { hotel_id: payment.hotel_id } });
+        if (sub) {
+          sub.extra_rooms = (sub.extra_rooms || 0) + payment.months; // months stores room count
+          await this.subRepo.save(sub);
+          this.logger.log(`🏠 Extra rooms added: hotel=${payment.hotel_id}, +${payment.months} rooms, total=${sub.extra_rooms}`);
+        }
+      } else {
+        // Normal plan activation — months=0 means upgrade (keep expiry)
+        const isUpgrade = payment.months === 0;
+        await this.activateSubscription(
+          payment.hotel_id,
+          payment.plan_name,
+          payment.months,
+          isUpgrade,
+          payment.extra_rooms || 0,
+        );
+      }
 
       this.logger.log(
-        `✅ Payment confirmed: hotel=${payment.hotel_id}, plan=${payment.plan_name}, ${isUpgrade ? 'UPGRADE' : `${payment.months}m`}`,
+        `✅ Payment confirmed: hotel=${payment.hotel_id}, plan=${payment.plan_name}, months=${payment.months}`,
       );
       return { success: true };
     } catch (error) {
@@ -304,13 +333,22 @@ export class PaymentService {
           payment.paid_at = new Date();
           await this.paymentRepo.save(payment);
 
-          const isUpgrade = payment.months === 0;
-          await this.activateSubscription(
-            payment.hotel_id,
-            payment.plan_name,
-            payment.months,
-            isUpgrade,
-          );
+          if (payment.plan_name === 'extra_rooms') {
+            const sub = await this.subRepo.findOne({ where: { hotel_id: payment.hotel_id } });
+            if (sub) {
+              sub.extra_rooms = (sub.extra_rooms || 0) + payment.months;
+              await this.subRepo.save(sub);
+            }
+          } else {
+            const isUpgrade = payment.months === 0;
+            await this.activateSubscription(
+              payment.hotel_id,
+              payment.plan_name,
+              payment.months,
+              isUpgrade,
+              payment.extra_rooms || 0,
+            );
+          }
         }
       } catch {
         // PayOS info fetch failed, rely on webhook
@@ -326,6 +364,7 @@ export class PaymentService {
     planName: string,
     months: number,
     keepExpiry = false,
+    bundledExtraRooms = 0,
   ) {
     const plan = await this.planRepo.findOne({ where: { name: planName } });
     if (!plan) return;
@@ -333,6 +372,19 @@ export class PaymentService {
     let sub = await this.subRepo.findOne({ where: { hotel_id: hotelId } });
     if (!sub) {
       sub = this.subRepo.create({ hotel_id: hotelId });
+    }
+
+    // Smart reset extra_rooms on upgrade
+    if (plan.max_rooms >= (sub.max_rooms || 0) + (sub.extra_rooms || 0)) {
+      // New plan has enough rooms — reset add-on
+      sub.extra_rooms = 0;
+    }
+    // else: keep extra_rooms — user still needs them
+
+    // Apply bundled extra rooms from this payment
+    if (bundledExtraRooms > 0) {
+      sub.extra_rooms = (sub.extra_rooms || 0) + bundledExtraRooms;
+      this.logger.log(`🏠 Bundled extra rooms: hotel=${hotelId}, +${bundledExtraRooms} rooms`);
     }
 
     sub.plan = planName;
@@ -362,6 +414,99 @@ export class PaymentService {
       where: { hotel_id: hotelId },
       order: { created_at: 'DESC' },
     });
+  }
+
+  // ─── Extra Rooms ───
+  async getExtraRoomPrice(): Promise<number> {
+    const config = await this.configRepo.findOne({
+      where: { key: 'extra_room_price' },
+    });
+    return config ? parseInt(config.value) : 10000;
+  }
+
+  async calculateExtraRooms(hotelId: number, count: number) {
+    if (count < 1) throw new BadRequestException('Số phòng phải >= 1');
+
+    const sub = await this.subRepo.findOne({ where: { hotel_id: hotelId } });
+    if (!sub) throw new NotFoundException('Subscription không tồn tại');
+    if (!sub.expires_at) throw new BadRequestException('Gói hiện tại không có thời hạn. Vui lòng đăng ký gói trước.');
+
+    const pricePerRoom = await this.getExtraRoomPrice();
+    const now = new Date();
+    const expiresAt = new Date(sub.expires_at);
+    const daysRemaining = Math.max(1, Math.ceil((expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+
+    const rawAmount = count * pricePerRoom * (daysRemaining / 30);
+    const amount = Math.ceil(rawAmount / 1000) * 1000;
+
+    return {
+      count,
+      price_per_room: pricePerRoom,
+      days_remaining: daysRemaining,
+      current_extra: sub.extra_rooms || 0,
+      new_total: (sub.extra_rooms || 0) + count,
+      max_rooms_after: sub.max_rooms + (sub.extra_rooms || 0) + count,
+      amount,
+      message: `Mua thêm ${count} phòng × ${(pricePerRoom / 1000).toFixed(0)}k × ${daysRemaining} ngày = ${(amount / 1000).toFixed(0)}k`,
+    };
+  }
+
+  async createExtraRoomPayment(
+    hotelId: number,
+    count: number,
+    returnUrl: string,
+    cancelUrl: string,
+  ) {
+    if (!this.payos) throw new BadRequestException('PayOS chưa được cấu hình');
+
+    const calc = await this.calculateExtraRooms(hotelId, count);
+    if (calc.amount <= 0) throw new BadRequestException('Số tiền không hợp lệ');
+
+    const orderCode = Date.now();
+    const description = `PetLog +${count} phòng`;
+
+    const paymentData = {
+      orderCode,
+      amount: calc.amount,
+      description,
+      returnUrl,
+      cancelUrl,
+      items: [{
+        name: `Thêm ${count} phòng (${calc.days_remaining} ngày)`,
+        quantity: 1,
+        price: calc.amount,
+      }],
+    };
+
+    this.logger.log(`📤 Extra rooms payment: orderCode=${orderCode}, amount=${calc.amount}, +${count} rooms`);
+
+    let response: { checkoutUrl: string };
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      response = await this.payos.paymentRequests.create(paymentData);
+    } catch (err: unknown) {
+      const e = err as { message?: string; body?: unknown };
+      this.logger.error(`❌ PayOS error: ${e.message}`, JSON.stringify(e.body || e));
+      throw new BadRequestException(`Lỗi tạo link thanh toán: ${e.message || 'PayOS error'}`);
+    }
+
+    const payment = this.paymentRepo.create({
+      hotel_id: hotelId,
+      order_code: orderCode,
+      amount: calc.amount,
+      plan_name: 'extra_rooms',
+      months: count, // Store room count in months field
+      status: 'pending',
+      checkout_url: response.checkoutUrl,
+      payos_data: response as unknown as Record<string, unknown>,
+    });
+    await this.paymentRepo.save(payment);
+
+    return {
+      checkoutUrl: response.checkoutUrl,
+      orderCode,
+      amount: calc.amount,
+    };
   }
 
   // ─── Config helpers ───

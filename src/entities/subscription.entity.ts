@@ -25,6 +25,9 @@ export class Subscription {
   @Column({ default: 3 })
   max_rooms: number;
 
+  @Column({ default: 0 })
+  extra_rooms: number;
+
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   started_at: Date;
 

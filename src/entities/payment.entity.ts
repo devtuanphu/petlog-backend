@@ -32,6 +32,9 @@ export class Payment {
   @Column({ type: 'int', default: 1 })
   months: number;
 
+  @Column({ type: 'int', default: 0 })
+  extra_rooms: number;
+
   @Column({ length: 20, default: 'pending' })
   status: string; // pending, paid, cancelled
 

@@ -242,9 +242,32 @@ export class AdminService implements OnModuleInit {
   async getHotelById(id: number) {
     const h = await this.hotelRepo.findOne({
       where: { id },
-      relations: ['owner', 'subscription', 'rooms'],
+      relations: ['owner', 'subscription', 'rooms', 'rooms.bookings', 'rooms.bookings.pets'],
     });
     if (!h) throw new NotFoundException('Cửa hàng không tồn tại');
+
+    const rooms = (h.rooms || []).map((r) => {
+      const activeBooking = r.bookings?.find((b) => b.status === 'active') || null;
+      return {
+        id: r.id,
+        room_name: r.room_name,
+        is_active: r.is_active,
+        active_booking: activeBooking
+          ? {
+              id: activeBooking.id,
+              owner_name: activeBooking.owner_name,
+              owner_phone: activeBooking.owner_phone,
+              check_in_at: activeBooking.check_in_at,
+              expected_checkout: activeBooking.expected_checkout,
+              pet_name: activeBooking.pets?.[0]?.name || '—',
+              pet_species: activeBooking.pets?.[0]?.type || '',
+            }
+          : null,
+      };
+    });
+
+    const activeRooms = rooms.filter((r) => r.active_booking).length;
+
     return {
       id: h.id,
       name: h.name,
@@ -254,12 +277,14 @@ export class AdminService implements OnModuleInit {
       owner_email: h.owner?.email || '—',
       plan: h.subscription?.plan || 'trial',
       max_rooms: h.subscription?.max_rooms || 3,
+      extra_rooms: h.subscription?.extra_rooms || 0,
       is_active: h.subscription?.is_active ?? true,
       trial_ends_at: h.subscription?.trial_ends_at,
       expires_at: h.subscription?.expires_at,
       started_at: h.subscription?.started_at,
       room_count: h.rooms?.length || 0,
-      rooms: h.rooms?.map((r) => ({ id: r.id, room_name: r.room_name })) || [],
+      active_rooms: activeRooms,
+      rooms,
       created_at: h.created_at,
     };
   }
@@ -273,7 +298,7 @@ export class AdminService implements OnModuleInit {
 
   async updateSubscription(
     hotelId: number,
-    data: { plan?: string; max_rooms?: number; is_active?: boolean },
+    data: { plan?: string; max_rooms?: number; extra_rooms?: number; is_active?: boolean },
   ) {
     let sub = await this.subRepo.findOne({ where: { hotel_id: hotelId } });
     if (!sub) {
@@ -285,6 +310,7 @@ export class AdminService implements OnModuleInit {
     } else {
       if (data.plan !== undefined) sub.plan = data.plan;
       if (data.max_rooms !== undefined) sub.max_rooms = data.max_rooms;
+      if (data.extra_rooms !== undefined) sub.extra_rooms = data.extra_rooms;
       if (data.is_active !== undefined) sub.is_active = data.is_active;
     }
     return this.subRepo.save(sub);

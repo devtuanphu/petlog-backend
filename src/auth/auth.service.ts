@@ -113,6 +113,7 @@ export class AuthService {
         ? {
             plan: user.hotel.subscription.plan,
             max_rooms: user.hotel.subscription.max_rooms,
+            extra_rooms: user.hotel.subscription.extra_rooms || 0,
             expires_at: user.hotel.subscription.expires_at,
             trial_ends_at: user.hotel.subscription.trial_ends_at,
             is_active: user.hotel.subscription.is_active,

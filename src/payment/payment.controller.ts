@@ -35,7 +35,7 @@ export class PaymentController {
   @UseGuards(JwtAuthGuard)
   createPayment(
     @Request() req: any,
-    @Body() body: { plan: string; months?: number; upgrade?: boolean },
+    @Body() body: { plan: string; months?: number; upgrade?: boolean; extra_rooms?: number },
   ) {
     const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     return this.paymentService.createPaymentLink(
@@ -45,6 +45,7 @@ export class PaymentController {
       `${baseUrl}/dashboard/pricing?status=success`,
       `${baseUrl}/dashboard/pricing?status=cancel`,
       body.upgrade || false,
+      body.extra_rooms || 0,
     );
   }
 
@@ -59,6 +60,38 @@ export class PaymentController {
   @UseGuards(JwtAuthGuard)
   checkPayment(@Query('orderCode') orderCode: string) {
     return this.paymentService.handlePaymentReturn(parseInt(orderCode));
+  }
+
+  // Owner: calculate extra rooms cost
+  @Get('extra-rooms-cost')
+  @UseGuards(JwtAuthGuard)
+  calculateExtraRooms(
+    @Request() req: any,
+    @Query('count') count: string,
+  ) {
+    return this.paymentService.calculateExtraRooms(req.user.hotel_id, parseInt(count) || 1);
+  }
+
+  // Owner: buy extra rooms
+  @Post('extra-rooms')
+  @UseGuards(JwtAuthGuard)
+  createExtraRoomPayment(
+    @Request() req: any,
+    @Body() body: { count: number },
+  ) {
+    const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    return this.paymentService.createExtraRoomPayment(
+      req.user.hotel_id,
+      body.count,
+      `${baseUrl}/dashboard/pricing?status=success`,
+      `${baseUrl}/dashboard/pricing?status=cancel`,
+    );
+  }
+
+  // Public: get extra room price
+  @Get('extra-room-price')
+  async getExtraRoomPrice() {
+    return { price: await this.paymentService.getExtraRoomPrice() };
   }
 
   // Owner: payment history
