@@ -289,6 +289,43 @@ export class AdminService implements OnModuleInit {
     };
   }
 
+  async getBookingDetail(bookingId: number) {
+    const b = await this.bookingRepo.findOne({
+      where: { id: bookingId },
+      relations: ['room', 'pets', 'logs', 'logs.staff', 'logs.pet'],
+      order: { logs: { created_at: 'DESC' } },
+    });
+    if (!b) throw new NotFoundException('Booking không tồn tại');
+
+    return {
+      id: b.id,
+      room_name: b.room?.room_name || '—',
+      owner_name: b.owner_name,
+      owner_phone: b.owner_phone,
+      check_in_at: b.check_in_at,
+      check_out_at: b.check_out_at,
+      expected_checkout: b.expected_checkout,
+      status: b.status,
+      diary_token: b.diary_token,
+      pets: (b.pets || []).map(p => ({
+        id: p.id,
+        name: p.name,
+        type: p.type,
+        image_url: p.image_url,
+        special_notes: p.special_notes,
+      })),
+      logs: (b.logs || []).map(l => ({
+        id: l.id,
+        action_type: l.action_type,
+        description: l.description,
+        image_url: l.image_url,
+        created_at: l.created_at,
+        staff_name: l.staff?.full_name || null,
+        pet_name: l.pet?.name || null,
+      })),
+    };
+  }
+
   async getPaymentsByHotel(hotelId: number) {
     return this.paymentRepo.find({
       where: { hotel_id: hotelId },

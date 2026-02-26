@@ -67,6 +67,13 @@ export class AdminController {
     return this.adminService.getPaymentsByHotel(parseInt(id));
   }
 
+  @Get('bookings/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  getBookingDetail(@Param('id') id: string) {
+    return this.adminService.getBookingDetail(parseInt(id));
+  }
+
   @Patch('hotels/:id/subscription')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
