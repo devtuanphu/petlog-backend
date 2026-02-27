@@ -6,6 +6,7 @@ import { Room } from '../entities/room.entity';
 import { Booking } from '../entities/booking.entity';
 import { Pet } from '../entities/pet.entity';
 import { Hotel } from '../entities/hotel.entity';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 
 @Injectable()
 export class PublicService {
@@ -14,6 +15,7 @@ export class PublicService {
     @InjectRepository(Booking) private bookingRepo: Repository<Booking>,
     @InjectRepository(Pet) private petRepo: Repository<Pet>,
     @InjectRepository(Hotel) private hotelRepo: Repository<Hotel>,
+    private activityLog: ActivityLogService,
   ) {}
 
   async getRoomInfo(qrToken: string) {
@@ -90,6 +92,19 @@ export class PublicService {
     );
     await this.petRepo.save(pets);
 
+    await this.activityLog.log({
+      hotelId: room.hotel_id,
+      action: 'BOOKING_CHECKIN',
+      targetType: 'booking',
+      targetId: booking.id,
+      metadata: {
+        room_name: room.room_name,
+        owner_name: data.owner_name,
+        pet_count: data.pets.length,
+        pet_names: data.pets.map(p => p.name).join(', '),
+      },
+    });
+
     return {
       booking_id: booking.id,
       diary_token: diaryToken,
@@ -118,6 +133,14 @@ export class PublicService {
       relations: ['room', 'room.hotel', 'pets', 'logs', 'logs.staff', 'logs.pet'],
     });
     if (!booking) throw new NotFoundException('Diary không tìm thấy');
+
+    await this.activityLog.log({
+      hotelId: booking.room.hotel_id,
+      action: 'DIARY_VIEW',
+      targetType: 'booking',
+      targetId: booking.id,
+      metadata: { owner_name: booking.owner_name, room_name: booking.room.room_name },
+    });
 
     return {
       booking_id: booking.id,

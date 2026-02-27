@@ -8,6 +8,7 @@ import { mkdirSync, existsSync } from 'fs';
 import { Room } from '../entities/room.entity';
 import { Subscription } from '../entities/subscription.entity';
 import { Booking } from '../entities/booking.entity';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 
 @Injectable()
 export class RoomService {
@@ -17,6 +18,7 @@ export class RoomService {
     @InjectRepository(Room) private roomRepo: Repository<Room>,
     @InjectRepository(Subscription) private subRepo: Repository<Subscription>,
     @InjectRepository(Booking) private bookingRepo: Repository<Booking>,
+    private activityLog: ActivityLogService,
   ) {
     // Ensure QR upload directory exists
     if (!existsSync(this.uploadsDir)) {
@@ -89,6 +91,12 @@ export class RoomService {
     // Generate QR codes for all rooms
     await Promise.all(savedRooms.map((room) => this.generateQrImage(room)));
 
+    await this.activityLog.log({
+      hotelId,
+      action: 'ROOM_CREATE',
+      metadata: { count, room_names: savedRooms.map(r => r.room_name).join(', ') },
+    });
+
     return savedRooms;
   }
 
@@ -104,6 +112,14 @@ export class RoomService {
 
     const savedRoom = await this.roomRepo.save(room);
     await this.generateQrImage(savedRoom);
+
+    await this.activityLog.log({
+      hotelId,
+      action: 'ROOM_CREATE',
+      targetType: 'room',
+      targetId: savedRoom.id,
+      metadata: { room_name: roomName },
+    });
 
     return savedRoom;
   }
@@ -133,6 +149,15 @@ export class RoomService {
     }
 
     await this.roomRepo.remove(room);
+
+    await this.activityLog.log({
+      hotelId,
+      action: 'ROOM_DELETE',
+      targetType: 'room',
+      targetId: roomId,
+      metadata: { room_name: room.room_name },
+    });
+
     return { message: 'Đã xóa phòng' };
   }
 

@@ -8,6 +8,7 @@ import { Hotel } from '../entities/hotel.entity';
 import { Subscription } from '../entities/subscription.entity';
 import { SystemConfig } from '../entities/system-config.entity';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 
 @Injectable()
 export class AuthService {
@@ -17,6 +18,7 @@ export class AuthService {
     @InjectRepository(Subscription) private subRepo: Repository<Subscription>,
     @InjectRepository(SystemConfig) private configRepo: Repository<SystemConfig>,
     private jwtService: JwtService,
+    private activityLog: ActivityLogService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -63,6 +65,14 @@ export class AuthService {
     // 5. Generate JWT
     const token = this.generateToken(user);
 
+    // 6. Log activity
+    await this.activityLog.log({
+      hotelId: hotel.id,
+      userId: user.id,
+      action: 'REGISTER',
+      metadata: { hotel_name: hotel.name, email: user.email, full_name: user.full_name },
+    });
+
     return {
       access_token: token,
       user: this.sanitizeUser(user),
@@ -76,12 +86,30 @@ export class AuthService {
       relations: ['hotel'],
     });
 
-    if (!user) throw new UnauthorizedException('Email hoặc mật khẩu không đúng');
+    if (!user) {
+      await this.activityLog.log({ action: 'LOGIN_FAILED', metadata: { email: dto.email } });
+      throw new UnauthorizedException('Email hoặc mật khẩu không đúng');
+    }
 
     const isPasswordValid = await bcrypt.compare(dto.password, user.password);
-    if (!isPasswordValid) throw new UnauthorizedException('Email hoặc mật khẩu không đúng');
+    if (!isPasswordValid) {
+      await this.activityLog.log({
+        hotelId: user.hotel_id,
+        userId: user.id,
+        action: 'LOGIN_FAILED',
+        metadata: { email: dto.email },
+      });
+      throw new UnauthorizedException('Email hoặc mật khẩu không đúng');
+    }
 
     const token = this.generateToken(user);
+
+    await this.activityLog.log({
+      hotelId: user.hotel_id,
+      userId: user.id,
+      action: 'LOGIN',
+      metadata: { email: user.email, role: user.role },
+    });
 
     return {
       access_token: token,

@@ -8,14 +8,19 @@ import {
   Body,
   UseGuards,
   Request,
+  Query,
 } from '@nestjs/common';
 import { AdminService } from './admin.service';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard, Roles } from '../guards/roles.guard';
 
 @Controller('admin')
 export class AdminController {
-  constructor(private adminService: AdminService) {}
+  constructor(
+    private adminService: AdminService,
+    private activityLogService: ActivityLogService,
+  ) {}
 
   // ─── Auth (no guard) ───
   @Post('auth/login')
@@ -141,5 +146,30 @@ export class AdminController {
   @Roles('admin')
   getRevenue() {
     return this.adminService.getRevenue();
+  }
+
+  // ─── Activity Logs ───
+  @Get('activity-logs')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  getActivityLogs(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('hotelId') hotelId?: string,
+    @Query('action') action?: string,
+  ) {
+    return this.activityLogService.getRecentLogs({
+      page: page ? parseInt(page) : 1,
+      limit: limit ? parseInt(limit) : 50,
+      hotelId: hotelId ? parseInt(hotelId) : undefined,
+      action: action || undefined,
+    });
+  }
+
+  @Get('alerts')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  getAlerts() {
+    return this.activityLogService.getSmartAlerts();
   }
 }

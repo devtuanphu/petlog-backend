@@ -17,6 +17,7 @@ import {
   Payment,
   SystemConfig,
 } from './entities';
+import { ActivityLog } from './entities/activity-log.entity';
 import { AuthModule } from './auth/auth.module';
 import { HotelModule } from './hotel/hotel.module';
 import { RoomModule } from './room/room.module';
@@ -28,6 +29,7 @@ import { SubscriptionModule } from './subscription/subscription.module';
 import { AdminModule } from './admin/admin.module';
 import { FeedbackModule } from './feedback/feedback.module';
 import { PaymentModule } from './payment/payment.module';
+import { ActivityLogModule } from './activity-log/activity-log.module';
 
 @Module({
   imports: [
@@ -52,6 +54,7 @@ import { PaymentModule } from './payment/payment.module';
         PricingPlan,
         Payment,
         SystemConfig,
+        ActivityLog,
       ],
       synchronize: true, // MVP only - disable in production
     }),
@@ -60,6 +63,7 @@ import { PaymentModule } from './payment/payment.module';
       serveRoot: '/uploads',
     }),
     AuthModule,
+    ActivityLogModule,
     HotelModule,
     RoomModule,
     BookingModule,

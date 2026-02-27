@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { Room } from '../entities/room.entity';
 import { Booking } from '../entities/booking.entity';
 import { Log } from '../entities/log.entity';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 
 @Injectable()
 export class OperationService {
@@ -11,6 +12,7 @@ export class OperationService {
     @InjectRepository(Room) private roomRepo: Repository<Room>,
     @InjectRepository(Booking) private bookingRepo: Repository<Booking>,
     @InjectRepository(Log) private logRepo: Repository<Log>,
+    private activityLog: ActivityLogService,
   ) {}
 
   async getRoomByQr(qrToken: string, hotelId: number) {
@@ -53,7 +55,10 @@ export class OperationService {
     staffId: number,
     data: { booking_id: number; pet_id?: number; action_type: string; description?: string; image_url?: string },
   ) {
-    const booking = await this.bookingRepo.findOne({ where: { id: data.booking_id, status: 'active' } });
+    const booking = await this.bookingRepo.findOne({
+      where: { id: data.booking_id, status: 'active' },
+      relations: ['room'],
+    });
     if (!booking) throw new NotFoundException('Booking không tìm thấy hoặc đã kết thúc');
 
     const log = this.logRepo.create({
@@ -64,7 +69,22 @@ export class OperationService {
       description: data.description,
       image_url: data.image_url,
     });
-    return this.logRepo.save(log);
+    const saved = await this.logRepo.save(log);
+
+    await this.activityLog.log({
+      hotelId: booking.room?.hotel_id,
+      userId: staffId,
+      action: 'LOG_CREATE',
+      targetType: 'log',
+      targetId: saved.id,
+      metadata: {
+        booking_id: data.booking_id,
+        action_type: data.action_type,
+        description: data.description,
+      },
+    });
+
+    return saved;
   }
 
   async getLogs(bookingId: number) {
@@ -94,6 +114,14 @@ export class OperationService {
       );
     booking.expected_checkout = new Date(newDate);
     await this.bookingRepo.save(booking);
+
+    await this.activityLog.log({
+      action: 'BOOKING_EXTEND',
+      targetType: 'booking',
+      targetId: bookingId,
+      metadata: { new_date: newDate },
+    });
+
     return { success: true, expected_checkout: booking.expected_checkout };
   }
 }

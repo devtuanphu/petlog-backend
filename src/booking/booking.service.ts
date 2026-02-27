@@ -3,12 +3,14 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Booking } from '../entities/booking.entity';
 import { Room } from '../entities/room.entity';
+import { ActivityLogService } from '../activity-log/activity-log.service';
 
 @Injectable()
 export class BookingService {
   constructor(
     @InjectRepository(Booking) private bookingRepo: Repository<Booking>,
     @InjectRepository(Room) private roomRepo: Repository<Room>,
+    private activityLog: ActivityLogService,
   ) {}
 
   async getBookings(hotelId: number, status?: string) {
@@ -38,6 +40,16 @@ export class BookingService {
 
     booking.status = 'completed';
     booking.check_out_at = new Date();
-    return this.bookingRepo.save(booking);
+    const saved = await this.bookingRepo.save(booking);
+
+    await this.activityLog.log({
+      hotelId: booking.room.hotel_id,
+      action: 'BOOKING_CHECKOUT',
+      targetType: 'booking',
+      targetId: bookingId,
+      metadata: { owner_name: booking.owner_name, room_name: booking.room.room_name },
+    });
+
+    return saved;
   }
 }
